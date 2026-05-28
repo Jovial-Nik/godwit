@@ -1,0 +1,56 @@
+name: Build unsigned IPA for local SOCKS
+on:
+  workflow_dispatch:
+jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - name: Checkout godwit
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Checkout olcrtc dependency
+        uses: actions/checkout@v4
+        with:
+          repository: openlibrecommunity/olcrtc
+          path: olcrtc
+          submodules: recursive
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+      - name: Download Go modules for olcrtc
+        working-directory: olcrtc
+        run: go mod download
+      - name: Install gomobile and init
+        run: |
+          go install golang.org/x/mobile/cmd/gomobile@latest
+          gomobile init -v
+      - name: Install xcodegen
+        run: brew install xcodegen
+      - name: Select Xcode and accept license
+        run: |
+          sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
+          sudo xcodebuild -license accept
+      - name: Patch ProfilePinger to disable MobilePing
+        run: |
+          FILE="apple/Sources/OlcRTCClientKit/Services/ProfilePinger.swift"
+          perl -0777 -i -pe 's/let didPing = MobilePing\(.*?\)/let didPing = true/s' "$FILE"
+          echo "Patched ProfilePinger.swift"
+      - name: Build unsigned local IPA
+        run: |
+          export OLCRTC_REPO_ROOT="${{ github.workspace }}/olcrtc"
+          ./apple/Scripts/build-ios-unsigned-local-ipa.sh 2>&1 | tee build.log
+        shell: bash
+      - name: Upload build log if failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log
+          path: build.log
+      - name: Upload IPA artifact
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Godwit-unsigned-local
+          path: apple/.build/ios-unsigned-local/Godwit-unsigned-local.ipa
